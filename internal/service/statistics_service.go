@@ -45,45 +45,115 @@ func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, e
 
     switch name {
     case 1:
-        // Преобразуем StringOrNumber в строку
-        var codeFromOwner string
-        if payload.CodeFromOwner != nil {
-            codeFromOwner = string(*payload.CodeFromOwner)
-        } else {
+        if payload.CodeFromOwner == nil {
             return nil, nil
         }
 
+        // Сначала пытаемся найти существующую запись
         err = conn.QueryRow(ctx, `
-            INSERT INTO dsp_requests (name, gid)
-            VALUES ($1, $2)
-            ON CONFLICT (name, gid) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id, name, gid, oid, duration`,
-            name, codeFromOwner).Scan(
+            SELECT id, name, gid, oid, duration
+            FROM dsp_requests
+            WHERE name = $1 AND gid = $2`,
+            name, string(*payload.CodeFromOwner)).Scan(
             &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+
+        if err != nil {
+            if err == pgx.ErrNoRows {
+                // Если запись не найдена, создаем новую
+                _, err = conn.Exec(ctx, `
+                    INSERT INTO dsp_requests (name, gid)
+                    VALUES ($1, $2)`,
+                    name, string(*payload.CodeFromOwner))
+                if err != nil {
+                    return nil, err
+                }
+
+                // Повторно ищем запись
+                err = conn.QueryRow(ctx, `
+                    SELECT id, name, gid, oid, duration
+                    FROM dsp_requests
+                    WHERE name = $1 AND gid = $2`,
+                    name, string(*payload.CodeFromOwner)).Scan(
+                    &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+            }
+            if err != nil {
+                return nil, err
+            }
+        }
 
     case 2:
         if payload.GID == nil {
             return nil, nil
         }
+
+        // Сначала пытаемся найти существующую запись
         err = conn.QueryRow(ctx, `
-            INSERT INTO dsp_requests (name, gid)
-            VALUES ($1, $2)
-            ON CONFLICT (name, gid) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id, name, gid, oid, duration`,
+            SELECT id, name, gid, oid, duration
+            FROM dsp_requests
+            WHERE name = $1 AND gid = $2`,
             name, *payload.GID).Scan(
             &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+
+        if err != nil {
+            if err == pgx.ErrNoRows {
+                // Если запись не найдена, создаем новую
+                _, err = conn.Exec(ctx, `
+                    INSERT INTO dsp_requests (name, gid)
+                    VALUES ($1, $2)`,
+                    name, *payload.GID)
+                if err != nil {
+                    return nil, err
+                }
+
+                // Повторно ищем запись
+                err = conn.QueryRow(ctx, `
+                    SELECT id, name, gid, oid, duration
+                    FROM dsp_requests
+                    WHERE name = $1 AND gid = $2`,
+                    name, *payload.GID).Scan(
+                    &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+            }
+            if err != nil {
+                return nil, err
+            }
+        }
 
     case 3:
         if payload.GID == nil || payload.OID == nil || payload.Duration == nil {
             return nil, nil
         }
+
+        // Сначала пытаемся найти существующую запись
         err = conn.QueryRow(ctx, `
-            INSERT INTO dsp_requests (name, gid, oid, duration)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (name, gid, oid, duration) DO UPDATE SET name = EXCLUDED.name
-            RETURNING id, name, gid, oid, duration`,
+            SELECT id, name, gid, oid, duration
+            FROM dsp_requests
+            WHERE name = $1 AND gid = $2 AND oid = $3 AND duration = $4`,
             name, *payload.GID, *payload.OID, *payload.Duration).Scan(
             &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+
+        if err != nil {
+            if err == pgx.ErrNoRows {
+                // Если запись не найдена, создаем новую
+                _, err = conn.Exec(ctx, `
+                    INSERT INTO dsp_requests (name, gid, oid, duration)
+                    VALUES ($1, $2, $3, $4)`,
+                    name, *payload.GID, *payload.OID, *payload.Duration)
+                if err != nil {
+                    return nil, err
+                }
+
+                // Повторно ищем запись
+                err = conn.QueryRow(ctx, `
+                    SELECT id, name, gid, oid, duration
+                    FROM dsp_requests
+                    WHERE name = $1 AND gid = $2 AND oid = $3 AND duration = $4`,
+                    name, *payload.GID, *payload.OID, *payload.Duration).Scan(
+                    &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+            }
+            if err != nil {
+                return nil, err
+            }
+        }
     default:
         return nil, nil
     }
