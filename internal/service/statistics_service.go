@@ -5,6 +5,9 @@ import (
     "log"
     "time"
 
+    "dsp-statistics-go/internal/core"
+    "dsp-statistics-go/internal/db"
+
     "github.com/jackc/pgx/v4"
 )
 
@@ -14,17 +17,7 @@ var DSP_NAME = map[string]int{
     "RussOutdoor": 1,
 }
 
-type Payload struct {
-    Name         string  `json:"name"`
-    MinPrice     float64 `json:"min_price"`
-    ShowTimeTs   int64   `json:"show_time_ts"`
-    GID          *string `json:"gid"`
-    OID          *string `json:"oid"`
-    Duration     *int    `json:"duration"`
-    CodeFromOwner *string `json:"code_from_owner"`
-}
-
-func ProcessPayload(payload Payload) error {
+func ProcessPayload(payload core.Payload) error {
     name, exists := DSP_NAME[payload.Name]
     if !exists {
         return nil // Name not found, skip processing
@@ -43,11 +36,11 @@ func ProcessPayload(payload Payload) error {
     return UpdateStatistics(dspRequest.ID, payload.MinPrice, payload.ShowTimeTs)
 }
 
-func FindOrCreateDspRequest(name int, payload Payload) (*models.DspRequest, error) {
+func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, error) {
     ctx := context.Background()
     conn := db.GetDB()
 
-    var dspRequest models.DspRequest
+    var dspRequest core.DspRequest
     var err error
 
     switch name {

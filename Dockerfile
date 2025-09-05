@@ -9,9 +9,9 @@ RUN go mod download
 
 # Копируем и компилируем код
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o dsp-statistics ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o dsp-statistics ./cmd/server
 
-# Stage 2: Финальный образ
+# Stage 2: Минимальный образ
 FROM alpine:latest
 
 WORKDIR /root/

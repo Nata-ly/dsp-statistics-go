@@ -1,17 +1,17 @@
 package consumer
 
 import (
-    "context"
     "encoding/json"
     "log"
     "os"
     "os/signal"
     "syscall"
-    "time"
 
-    "github.com/confluentinc/confluent-kafka-go/kafka"
-    "dsp-statistics-go/internal/db"
+    "dsp-statistics-go/internal/core"
     "dsp-statistics-go/internal/service"
+    "dsp-statistics-go/internal/db"  // Важно: добавлен импорт пакета db
+
+    "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
 func StartConsumer() {
@@ -20,7 +20,7 @@ func StartConsumer() {
     defer db.CloseDB()
 
     // Kafka конфигурация
-    kafkaConfig := &kafka.ConfigMap{
+    kafkaConfig := kafka.ConfigMap{
         "bootstrap.servers": os.Getenv("KAFKA_BOOTSTRAP_SERVERS"),
         "group.id":          os.Getenv("KAFKA_GROUP_ID"),
         "auto.offset.reset": "earliest",
@@ -30,7 +30,7 @@ func StartConsumer() {
     }
 
     // Создание потребителя
-    consumer, err := kafka.NewConsumer(kafkaConfig)
+    consumer, err := kafka.NewConsumer(&kafkaConfig)
     if err != nil {
         log.Fatalf("Failed to create consumer: %s", err)
     }
@@ -66,20 +66,15 @@ func StartConsumer() {
                 log.Printf("Received message from partition %d | offset %d",
                     e.TopicPartition.Partition, e.TopicPartition.Offset)
 
-                var payload service.Payload
+                var payload core.Payload
                 if err := json.Unmarshal(e.Value, &payload); err != nil {
                     log.Printf("Error unmarshalling message: %s", err)
-                    // Пытаемся зафиксировать смещение даже при ошибке
-                    if _, commitErr := consumer.Commit(); commitErr != nil {
-                        log.Printf("Failed to commit offset after error: %s", commitErr)
-                    }
                     continue
                 }
 
                 if err := service.ProcessPayload(payload); err != nil {
                     log.Printf("Error processing payload: %s", err)
                 } else {
-                    // Фиксируем смещение только после успешной обработки
                     if _, err := consumer.Commit(); err != nil {
                         log.Printf("Failed to commit offset: %s", err)
                     }
