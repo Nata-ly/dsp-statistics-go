@@ -45,15 +45,20 @@ func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, e
 
     switch name {
     case 1:
-        if payload.CodeFromOwner == nil {
+        // Преобразуем StringOrNumber в строку
+        var codeFromOwner string
+        if payload.CodeFromOwner != nil {
+            codeFromOwner = string(*payload.CodeFromOwner)
+        } else {
             return nil, nil
         }
+
         err = conn.QueryRow(ctx, `
             INSERT INTO dsp_requests (name, gid)
             VALUES ($1, $2)
             ON CONFLICT (name, gid) DO UPDATE SET name = EXCLUDED.name
             RETURNING id, name, gid, oid, duration`,
-            name, *payload.CodeFromOwner).Scan(
+            name, codeFromOwner).Scan(
             &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
 
     case 2:
