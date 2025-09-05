@@ -192,23 +192,23 @@ func UpdateStatistics(dspRequestID int, minPrice float64, showTimeTs int64) erro
 
     if err != nil {
         if err == pgx.ErrNoRows {
-            // Create new stats record
+            // Create new stats record with created_at and updated_at
             _, err = conn.Exec(ctx, `
-                INSERT INTO dsp_statistics (dsp_request_id, date, hour, min_bid, avg_bid, bid_count, closed)
-                VALUES ($1, $2, $3, $4, $4, 1, false)`,
+                INSERT INTO dsp_statistics (dsp_request_id, date, hour, min_bid, avg_bid, bid_count, closed, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $4, 1, false, NOW(), NOW())`,
                 dspRequestID, showTime, hour, newMinBid)
             return err
         }
         return err
     }
 
-    // Update existing stats
+    // Update existing stats with updated_at
     newAvgBid := (stats.AvgBid*float64(stats.BidCount) + newMinBid) / float64(stats.BidCount+1)
     newMinBid = minFloat(stats.MinBid, newMinBid)
 
     _, err = conn.Exec(ctx, `
         UPDATE dsp_statistics
-        SET min_bid = $1, avg_bid = $2, bid_count = bid_count + 1
+        SET min_bid = $1, avg_bid = $2, bid_count = bid_count + 1, updated_at = NOW()
         WHERE id = $3`,
         newMinBid, newAvgBid, stats.ID)
 
