@@ -59,10 +59,10 @@ func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, e
 
         if err != nil {
             if err == pgx.ErrNoRows {
-                // Если запись не найдена, создаем новую
+                // Если запись не найдена, создаем новую с created_at и updated_at
                 _, err = conn.Exec(ctx, `
-                    INSERT INTO dsp_requests (name, gid)
-                    VALUES ($1, $2)`,
+                    INSERT INTO dsp_requests (name, gid, created_at, updated_at)
+                    VALUES ($1, $2, NOW(), NOW())`,
                     name, string(*payload.CodeFromOwner))
                 if err != nil {
                     return nil, err
@@ -96,10 +96,10 @@ func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, e
 
         if err != nil {
             if err == pgx.ErrNoRows {
-                // Если запись не найдена, создаем новую
+                // Если запись не найдена, создаем новую с created_at и updated_at
                 _, err = conn.Exec(ctx, `
-                    INSERT INTO dsp_requests (name, gid)
-                    VALUES ($1, $2)`,
+                    INSERT INTO dsp_requests (name, gid, created_at, updated_at)
+                    VALUES ($1, $2, NOW(), NOW())`,
                     name, *payload.GID)
                 if err != nil {
                     return nil, err
@@ -133,10 +133,10 @@ func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, e
 
         if err != nil {
             if err == pgx.ErrNoRows {
-                // Если запись не найдена, создаем новую
+                // Если запись не найдена, создаем новую с created_at и updated_at
                 _, err = conn.Exec(ctx, `
-                    INSERT INTO dsp_requests (name, gid, oid, duration)
-                    VALUES ($1, $2, $3, $4)`,
+                    INSERT INTO dsp_requests (name, gid, oid, duration, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, NOW(), NOW())`,
                     name, *payload.GID, *payload.OID, *payload.Duration)
                 if err != nil {
                     return nil, err
