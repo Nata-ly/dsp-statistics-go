@@ -21,6 +21,7 @@ type DspStatistic struct {
     Date         time.Time
     Hour         int
     MinBid       float64
+    MaxBid       float64
     AvgBid       float64
     BidCount     int
     Closed       bool

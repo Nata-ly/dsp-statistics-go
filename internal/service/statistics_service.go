@@ -180,22 +180,23 @@ func UpdateStatistics(dspRequestID int, minPrice float64, showTimeTs int64) erro
     var stats struct {
         ID       int
         MinBid   float64
+        MaxBid   float64
         AvgBid   float64
         BidCount int
     }
 
     err := conn.QueryRow(ctx, `
-        SELECT id, min_bid, avg_bid, bid_count
+        SELECT id, min_bid, max_bid, avg_bid, bid_count
         FROM dsp_statistics
         WHERE dsp_request_id = $1 AND date = $2 AND hour = $3`,
-        dspRequestID, showTime, hour).Scan(&stats.ID, &stats.MinBid, &stats.AvgBid, &stats.BidCount)
+        dspRequestID, showTime, hour).Scan(&stats.ID, &stats.MinBid, &stats.MaxBid, &stats.AvgBid, &stats.BidCount)
 
     if err != nil {
         if err == pgx.ErrNoRows {
             // Create new stats record with created_at and updated_at
             _, err = conn.Exec(ctx, `
-                INSERT INTO dsp_statistics (dsp_request_id, date, hour, min_bid, avg_bid, bid_count, closed, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $4, 1, false, NOW(), NOW())`,
+                INSERT INTO dsp_statistics (dsp_request_id, date, hour, min_bid, max_bid, avg_bid, bid_count, closed, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $4, $4, 1, false, NOW(), NOW())`,
                 dspRequestID, showTime, hour, newMinBid)
             return err
         }
@@ -205,18 +206,26 @@ func UpdateStatistics(dspRequestID int, minPrice float64, showTimeTs int64) erro
     // Update existing stats with updated_at
     newAvgBid := (stats.AvgBid*float64(stats.BidCount) + newMinBid) / float64(stats.BidCount+1)
     newMinBid = minFloat(stats.MinBid, newMinBid)
+    newMaxBid := maxFloat(stats.MaxBid, newMinBid)
 
     _, err = conn.Exec(ctx, `
         UPDATE dsp_statistics
-        SET min_bid = $1, avg_bid = $2, bid_count = bid_count + 1, updated_at = NOW()
-        WHERE id = $3`,
-        newMinBid, newAvgBid, stats.ID)
+        SET min_bid = $1, max_bid = $2, avg_bid = $3, bid_count = bid_count + 1, updated_at = NOW()
+        WHERE id = $4`,
+        newMinBid, newMaxBid, newAvgBid, stats.ID)
 
     return err
 }
 
 func minFloat(a, b float64) float64 {
     if a < b {
+        return a
+    }
+    return b
+}
+
+func maxFloat(a, b float64) float64 {
+    if a > b {
         return a
     }
     return b
