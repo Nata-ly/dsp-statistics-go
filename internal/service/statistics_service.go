@@ -1,232 +1,145 @@
 package service
 
 import (
-    "context"
-    "log"
-    "time"
+	"context"
+	"log"
+	"time"
 
-    "dsp-statistics-go/internal/core"
-    "dsp-statistics-go/internal/db"
-
-    "github.com/jackc/pgx/v4"
+	"dsp-statistics-go/internal/core"
+	"dsp-statistics-go/internal/db"
 )
 
 var DSP_NAME = map[string]int{
-    "Dron":        2,
-    "CityScreen":  3,
-    "RussOutdoor": 1,
+	"Dron":        2,
+	"CityScreen":  3,
+	"RussOutdoor": 1,
 }
 
 func ProcessPayload(payload core.Payload) error {
-    name, exists := DSP_NAME[payload.Name]
-    if !exists {
-        return nil // Name not found, skip processing
-    }
+	name, exists := DSP_NAME[payload.Name]
+	if !exists {
+		return nil // Name not found, skip processing
+	}
 
-    dspRequest, err := FindOrCreateDspRequest(name, payload)
-    if err != nil {
-        return err
-    }
+	dspRequest, err := FindOrCreateDspRequest(name, payload)
+	if err != nil {
+		return err
+	}
 
-    if dspRequest == nil {
-        log.Printf("DSP request not created for payload: %+v", payload)
-        return nil
-    }
+	if dspRequest == nil {
+		log.Printf("DSP request not created for payload: %+v", payload)
+		return nil
+	}
 
-    return UpdateStatistics(dspRequest.ID, payload.MinPrice, payload.ShowTimeTs)
+	showTime := time.Unix(payload.ShowTimeTs, 0).Truncate(time.Hour)
+	hour := showTime.Hour()
+	minPrice := payload.MinPrice
+	getDefaultBuffer().Add(dspRequest.ID, showTime, hour, minPrice)
+	return nil
 }
 
+// FindOrCreateDspRequest uses INSERT ... ON CONFLICT (upsert) for a single DB round-trip.
 func FindOrCreateDspRequest(name int, payload core.Payload) (*core.DspRequest, error) {
-    ctx := context.Background()
-    conn := db.GetDB()
+	ctx := context.Background()
+	conn := db.GetDB()
 
-    var dspRequest core.DspRequest
-    var err error
+	var dspRequest core.DspRequest
 
-    switch name {
-    case 1:
-        if payload.CodeFromOwner == nil {
-            return nil, nil
-        }
+	switch name {
+	case 1:
+		if payload.CodeFromOwner == nil {
+			return nil, nil
+		}
+		gid := string(*payload.CodeFromOwner)
+		err := conn.QueryRow(ctx, `
+			INSERT INTO dsp_requests (name, gid, created_at, updated_at)
+			VALUES ($1, $2, NOW(), NOW())
+			ON CONFLICT (name, gid) WHERE (oid IS NULL AND duration IS NULL)
+			DO UPDATE SET updated_at = NOW()
+			RETURNING id, name, gid, oid, duration`,
+			name, gid).Scan(&dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+		if err != nil {
+			return nil, err
+		}
+		dspRequest.GID = gid
+		return &dspRequest, nil
 
-        // Сначала пытаемся найти существующую запись
-        err = conn.QueryRow(ctx, `
-            SELECT id, name, gid, oid, duration
-            FROM dsp_requests
-            WHERE name = $1 AND gid = $2`,
-            name, string(*payload.CodeFromOwner)).Scan(
-            &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+	case 2:
+		if payload.GID == nil {
+			return nil, nil
+		}
+		gid := *payload.GID
+		err := conn.QueryRow(ctx, `
+			INSERT INTO dsp_requests (name, gid, created_at, updated_at)
+			VALUES ($1, $2, NOW(), NOW())
+			ON CONFLICT (name, gid) WHERE (oid IS NULL AND duration IS NULL)
+			DO UPDATE SET updated_at = NOW()
+			RETURNING id, name, gid, oid, duration`,
+			name, gid).Scan(&dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+		if err != nil {
+			return nil, err
+		}
+		dspRequest.GID = gid
+		return &dspRequest, nil
 
-        if err != nil {
-            if err == pgx.ErrNoRows {
-                // Если запись не найдена, создаем новую с created_at и updated_at
-                _, err = conn.Exec(ctx, `
-                    INSERT INTO dsp_requests (name, gid, created_at, updated_at)
-                    VALUES ($1, $2, NOW(), NOW())`,
-                    name, string(*payload.CodeFromOwner))
-                if err != nil {
-                    return nil, err
-                }
+	case 3:
+		if payload.GID == nil || payload.OID == nil || payload.Duration == nil {
+			return nil, nil
+		}
+		err := conn.QueryRow(ctx, `
+			INSERT INTO dsp_requests (name, gid, oid, duration, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, NOW(), NOW())
+			ON CONFLICT (name, gid, oid, duration) WHERE (oid IS NOT NULL)
+			DO UPDATE SET updated_at = NOW()
+			RETURNING id, name, gid, oid, duration`,
+			name, *payload.GID, *payload.OID, *payload.Duration).Scan(
+			&dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
+		if err != nil {
+			return nil, err
+		}
+		return &dspRequest, nil
 
-                // Повторно ищем запись
-                err = conn.QueryRow(ctx, `
-                    SELECT id, name, gid, oid, duration
-                    FROM dsp_requests
-                    WHERE name = $1 AND gid = $2`,
-                    name, string(*payload.CodeFromOwner)).Scan(
-                    &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
-            }
-            if err != nil {
-                return nil, err
-            }
-        }
-
-    case 2:
-        if payload.GID == nil {
-            return nil, nil
-        }
-
-        // Сначала пытаемся найти существующую запись
-        err = conn.QueryRow(ctx, `
-            SELECT id, name, gid, oid, duration
-            FROM dsp_requests
-            WHERE name = $1 AND gid = $2`,
-            name, *payload.GID).Scan(
-            &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
-
-        if err != nil {
-            if err == pgx.ErrNoRows {
-                // Если запись не найдена, создаем новую с created_at и updated_at
-                _, err = conn.Exec(ctx, `
-                    INSERT INTO dsp_requests (name, gid, created_at, updated_at)
-                    VALUES ($1, $2, NOW(), NOW())`,
-                    name, *payload.GID)
-                if err != nil {
-                    return nil, err
-                }
-
-                // Повторно ищем запись
-                err = conn.QueryRow(ctx, `
-                    SELECT id, name, gid, oid, duration
-                    FROM dsp_requests
-                    WHERE name = $1 AND gid = $2`,
-                    name, *payload.GID).Scan(
-                    &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
-            }
-            if err != nil {
-                return nil, err
-            }
-        }
-
-    case 3:
-        if payload.GID == nil || payload.OID == nil || payload.Duration == nil {
-            return nil, nil
-        }
-
-        // Сначала пытаемся найти существующую запись
-        err = conn.QueryRow(ctx, `
-            SELECT id, name, gid, oid, duration
-            FROM dsp_requests
-            WHERE name = $1 AND gid = $2 AND oid = $3 AND duration = $4`,
-            name, *payload.GID, *payload.OID, *payload.Duration).Scan(
-            &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
-
-        if err != nil {
-            if err == pgx.ErrNoRows {
-                // Если запись не найдена, создаем новую с created_at и updated_at
-                _, err = conn.Exec(ctx, `
-                    INSERT INTO dsp_requests (name, gid, oid, duration, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-                    name, *payload.GID, *payload.OID, *payload.Duration)
-                if err != nil {
-                    return nil, err
-                }
-
-                // Повторно ищем запись
-                err = conn.QueryRow(ctx, `
-                    SELECT id, name, gid, oid, duration
-                    FROM dsp_requests
-                    WHERE name = $1 AND gid = $2 AND oid = $3 AND duration = $4`,
-                    name, *payload.GID, *payload.OID, *payload.Duration).Scan(
-                    &dspRequest.ID, &dspRequest.Name, &dspRequest.GID, &dspRequest.OID, &dspRequest.Duration)
-            }
-            if err != nil {
-                return nil, err
-            }
-        }
-    default:
-        return nil, nil
-    }
-
-    if err != nil {
-        return nil, err
-    }
-
-    return &dspRequest, nil
+	default:
+		return nil, nil
+	}
 }
 
+// UpdateStatistics uses a single INSERT ... ON CONFLICT (upsert) instead of SELECT + INSERT/UPDATE.
 func UpdateStatistics(dspRequestID int, minPrice float64, showTimeTs int64) error {
-    ctx := context.Background()
-    conn := db.GetDB()
+	ctx := context.Background()
+	conn := db.GetDB()
 
-    newMinBid := minPrice
-    if newMinBid == 0.0 {
-        newMinBid = 0.01
-    }
+	newMinBid := minPrice
+	if newMinBid == 0.0 {
+		newMinBid = 0.01
+	}
 
-    showTime := time.Unix(showTimeTs, 0).Truncate(time.Hour)
-    hour := showTime.Hour()
+	showTime := time.Unix(showTimeTs, 0).Truncate(time.Hour)
+	hour := showTime.Hour()
 
-    var stats struct {
-        ID       int
-        MinBid   float64
-        MaxBid   float64
-        AvgBid   float64
-        BidCount int
-    }
-
-    err := conn.QueryRow(ctx, `
-        SELECT id, min_bid, max_bid, avg_bid, bid_count
-        FROM dsp_statistics
-        WHERE dsp_request_id = $1 AND date = $2 AND hour = $3`,
-        dspRequestID, showTime, hour).Scan(&stats.ID, &stats.MinBid, &stats.MaxBid, &stats.AvgBid, &stats.BidCount)
-
-    if err != nil {
-        if err == pgx.ErrNoRows {
-            // Create new stats record with created_at and updated_at
-            _, err = conn.Exec(ctx, `
-                INSERT INTO dsp_statistics (dsp_request_id, date, hour, min_bid, max_bid, avg_bid, bid_count, closed, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $4, $4, 1, false, NOW(), NOW())`,
-                dspRequestID, showTime, hour, newMinBid)
-            return err
-        }
-        return err
-    }
-
-    // Update existing stats with updated_at
-    newAvgBid := (stats.AvgBid*float64(stats.BidCount) + newMinBid) / float64(stats.BidCount+1)
-    newMinBid = minFloat(stats.MinBid, newMinBid)
-    newMaxBid := maxFloat(stats.MaxBid, newMinBid)
-
-    _, err = conn.Exec(ctx, `
-        UPDATE dsp_statistics
-        SET min_bid = $1, max_bid = $2, avg_bid = $3, bid_count = bid_count + 1, updated_at = NOW()
-        WHERE id = $4`,
-        newMinBid, newMaxBid, newAvgBid, stats.ID)
-
-    return err
+	_, err := conn.Exec(ctx, `
+		INSERT INTO dsp_statistics (dsp_request_id, date, hour, min_bid, max_bid, avg_bid, bid_count, closed, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $4, $4, 1, false, NOW(), NOW())
+		ON CONFLICT (dsp_request_id, date, hour) DO UPDATE SET
+			min_bid = LEAST(dsp_statistics.min_bid, EXCLUDED.min_bid),
+			max_bid = GREATEST(dsp_statistics.max_bid, EXCLUDED.max_bid),
+			bid_count = dsp_statistics.bid_count + EXCLUDED.bid_count,
+			avg_bid = (dsp_statistics.avg_bid * dsp_statistics.bid_count + EXCLUDED.min_bid * EXCLUDED.bid_count) / (dsp_statistics.bid_count + EXCLUDED.bid_count),
+			updated_at = NOW()`,
+		dspRequestID, showTime, hour, newMinBid)
+	return err
 }
 
 func minFloat(a, b float64) float64 {
-    if a < b {
-        return a
-    }
-    return b
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func maxFloat(a, b float64) float64 {
-    if a > b {
-        return a
-    }
-    return b
+	if a > b {
+		return a
+	}
+	return b
 }
