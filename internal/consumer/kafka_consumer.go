@@ -194,13 +194,17 @@ func runConsumerWorker(ctx context.Context, workerID int, topic string) {
 				continue
 			}
 
-			// Commit last offset per partition in the batch (next offset to fetch)
+			// Store and commit last offset per partition in the batch (next offset to fetch)
 			toCommit := lastOffsetsPerPartition(batch, topic)
 			if len(toCommit) > 0 {
-				if _, err := consumer.Commit(toCommit); err != nil {
+				if _, err := consumer.StoreOffsets(toCommit); err != nil {
+					log.Printf("[worker %d] Failed to store batch offsets: %s", workerID, err)
+					continue
+				}
+				if _, err := consumer.Commit(); err != nil {
 					log.Printf("[worker %d] Failed to commit batch offset: %s", workerID, err)
 					time.Sleep(100 * time.Millisecond)
-					if _, err := consumer.Commit(toCommit); err != nil {
+					if _, err := consumer.Commit(); err != nil {
 						log.Printf("[worker %d] Second attempt to commit batch offset failed: %s", workerID, err)
 					}
 				}
@@ -242,7 +246,7 @@ func lastOffsetsPerPartition(messages []*kafka.Message, topic string) []kafka.To
 	maxOffset := make(map[int32]int64)
 	for _, m := range messages {
 		p := m.TopicPartition.Partition
-		o := m.TopicPartition.Offset.Int64()
+		o := int64(m.TopicPartition.Offset)
 		if o+1 > maxOffset[p] {
 			maxOffset[p] = o + 1
 		}

@@ -7,6 +7,8 @@ Run the up migration before using the optimized consumer so that unique indexes 
 psql "$DATABASE_URL" -f migrations/001_unique_indexes.up.sql
 ```
 
+The migration first deduplicates existing data (merges duplicate `dsp_statistics` rows, consolidates duplicate `dsp_requests` and updates references), then creates the unique indexes.
+
 **Down (rollback):**
 ```bash
 psql "$DATABASE_URL" -f migrations/001_unique_indexes.down.sql
